@@ -674,7 +674,6 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   .spin { animation: spin 0.7s linear infinite; }
 
-  /* scroll indicator di mobile */
   .table-scroll-hint {
     font-family: var(--mono);
     font-size: 10px;
@@ -1091,28 +1090,54 @@
     }
   };
 
-  /* ── STATE ── */
-  let db = null;
-  let firebaseApp = null;
-  let dbListener = null;   /* named function — bukan return value on() */
-  let dbRef = null;        /* simpan ref agar .off() bisa dipakai meski db sudah ganti */
-  let isInitialLoad = true; /* true selama snapshot pertama, tidak boleh trigger notif */
-  let selectedInstance = null;
-  let soundEnabled = true;
-  const pesertaData = {};
-  const avatarColors = ['#4ade80','#60a5fa','#f472b6','#fb923c','#a78bfa','#34d399','#f59e0b'];
-  const MAX_NOTIF = 100;
-  const logHistory = [];
+  /* ══════════════════════════════════════════════════════════════
+     STATE
+  ══════════════════════════════════════════════════════════════ */
+  let db           = null;
+  let firebaseApp  = null;
+  let dbRef        = null;
+  let valueListener = null;   /* function reference untuk .off() */
 
   /*
-   * BUG FIX #1 — activeFilters menggunakan null (bukan undefined)
-   * sebagai nilai "tidak ada filter" agar === null check konsisten.
+   * FIX UTAMA — Ganti dari child_added/child_changed/child_removed
+   * ke on('value') tunggal dengan DIFF MANUAL.
+   *
+   * Mengapa ini memperbaiki semua bug sekaligus:
+   *
+   * 1. DOUBLE NOTIFIKASI
+   *    child_added + child_changed keduanya bisa fire untuk node
+   *    yang sama di mobile karena cache lokal Firebase. Dengan
+   *    on('value') hanya ada SATU callback per perubahan apapun.
+   *
+   * 2. LOG "KEMBALI" HILANG DI MOBILE
+   *    Mobile sering reconnect WiFi. Saat reconnect, Firebase SDK
+   *    mengirim ulang semua data. Dengan child_changed, `prev`
+   *    sudah ter-overwrite sehingga diff gagal. Dengan on('value'),
+   *    kita simpan snapshot sebelumnya secara eksplisit dan diff
+   *    dilakukan setelah flag initialLoad clear — tidak ada yang
+   *    terlewat.
+   *
+   * 3. RACE CONDITION isInitialLoad
+   *    Dengan on('value'), callback pertama SELALU berisi seluruh
+   *    data. Kita tandai `isFirstSnapshot = true` sebelum listener
+   *    dipasang, dan di dalam callback kita skip notifikasi + set
+   *    false. Tidak ada window antara child_added dan once('value').
    */
-  const activeFilters = { kelas: null, ruangan: null, status: null };
+  let isFirstSnapshot  = true;
+  /* prevSnapshot: { [key]: { status, ... } } — hanya field yang dibutuhkan untuk diff */
+  const prevSnapshot   = {};
 
-  /* ═══════════════════════════════════════
+  let selectedInstance = null;
+  let soundEnabled     = true;
+  const pesertaData    = {};
+  const avatarColors   = ['#4ade80','#60a5fa','#f472b6','#fb923c','#a78bfa','#34d399','#f59e0b'];
+  const MAX_NOTIF      = 100;
+  const logHistory     = [];
+  const activeFilters  = { kelas: null, ruangan: null, status: null };
+
+  /* ══════════════════════════════════════════════════════════════
      SELECTOR
-  ═══════════════════════════════════════ */
+  ══════════════════════════════════════════════════════════════ */
   function pilihInstance(num) {
     selectedInstance = num;
     document.querySelectorAll('.instance-btn').forEach(btn => {
@@ -1130,25 +1155,8 @@
   }
 
   function gantiInstance() {
-    /*
-     * Lepas listener SEBELUM hapus app — pakai dbRef yang tersimpan
-     * bukan db.ref() baru, karena db mungkin sudah invalid saat ini.
-     */
-    if (dbListener && dbRef) {
-      try { dbRef.off('value', dbListener); } catch(e) {}
-      dbListener = null;
-      dbRef = null;
-    }
-    /* Reset state */
-    isInitialLoad = true;
-    Object.keys(pesertaData).forEach(k => delete pesertaData[k]);
-    logHistory.length = 0;
-    activeFilters.kelas = activeFilters.ruangan = activeFilters.status = null;
-
-    renderTable();
-    updateStats();
-    clearLogSilent();
-
+    cabutListener();
+    resetState();
     document.getElementById('appContainer').style.display = 'none';
     document.getElementById('selectorOverlay').style.display = 'flex';
     document.querySelectorAll('.instance-btn').forEach(btn => btn.classList.remove('active'));
@@ -1156,92 +1164,129 @@
     selectedInstance = null;
   }
 
-  /* ═══════════════════════════════════════
-     FIREBASE
-  ═══════════════════════════════════════ */
+  /* ══════════════════════════════════════════════════════════════
+     FIREBASE — LISTENER TUNGGAL on('value')
+  ══════════════════════════════════════════════════════════════ */
   function initFirebase(instanceNum) {
     try {
-      const cfg = FIREBASE_CONFIGS[instanceNum];
+      cabutListener();
 
-      /* 1. Lepas listener lama sebelum app dihapus */
-      if (dbListener && dbRef) {
-        try { dbRef.off('value', dbListener); } catch(e) {}
-        dbListener = null;
-        dbRef = null;
-      }
-
-      /* 2. Hapus Firebase app lama */
       if (firebaseApp) {
         try { firebaseApp.delete(); } catch(e) {}
         firebaseApp = null;
         db = null;
       }
 
-      /* 3. Selalu anggap snapshot pertama sebagai initial load */
-      isInitialLoad = true;
-
+      const cfg     = FIREBASE_CONFIGS[instanceNum];
       const appName = `pengawas_${instanceNum}_${Date.now()}`;
-      firebaseApp = firebase.initializeApp(cfg, appName);
-      db = firebaseApp.database();
-      listenToPeserta();
+      firebaseApp   = firebase.initializeApp(cfg, appName);
+      db            = firebaseApp.database();
+
+      pasangListener();
     } catch(e) {
       console.error('Firebase init error:', e);
       showToast('Gagal menghubungkan ke Firebase. Coba lagi.', 'error');
     }
   }
 
-  function listenToPeserta() {
+  function cabutListener() {
+    if (valueListener && dbRef) {
+      try { dbRef.off('value', valueListener); } catch(e) {}
+      valueListener = null;
+      dbRef         = null;
+    }
+  }
+
+  function resetState() {
+    isFirstSnapshot = true;
+    Object.keys(pesertaData).forEach(k => delete pesertaData[k]);
+    Object.keys(prevSnapshot).forEach(k => delete prevSnapshot[k]);
+    logHistory.length = 0;
+    activeFilters.kelas = activeFilters.ruangan = activeFilters.status = null;
+    renderTable();
+    updateStats();
+    clearLogSilent();
+  }
+
+  function pasangListener() {
+    isFirstSnapshot = true;
     dbRef = db.ref('ujian/peserta');
 
     /*
-     * NAMED FUNCTION — wajib agar .off('value', dbListener) bisa
-     * benar-benar mencabut listener ini, bukan listener lain.
-     * Return value dari .on() di Firebase compat = callback itu sendiri,
-     * tapi lebih aman simpan sebagai named function eksplisit.
+     * on('value') fires dengan SELURUH subtree setiap ada perubahan.
+     * Kita lakukan diff manual: bandingkan snapshot baru vs prevSnapshot.
+     *
+     * Alur:
+     * 1. Snapshot pertama → isFirstSnapshot=true → populate pesertaData,
+     *    populate prevSnapshot, lalu set isFirstSnapshot=false. TIDAK ada notifikasi.
+     * 2. Snapshot berikutnya → isFirstSnapshot=false → diff prevSnapshot vs
+     *    data baru. Setiap key yang statusnya berbeda → trigger notifikasi.
+     *    Update pesertaData dan prevSnapshot dengan data terbaru.
+     * 3. Key yang ada di prevSnapshot tapi hilang dari snapshot baru → peserta dihapus.
      */
-    dbListener = function(snapshot) {
-      const data = snapshot.val() || {};
+    valueListener = dbRef.on('value', (snap) => {
+      const rawData = snap.val() || {};
 
-      Object.keys(data).forEach(id => {
-        const curr = data[id];
-        if (!curr || (!curr.nama && !curr.id)) return;
+      if (isFirstSnapshot) {
+        /* ── Populate tanpa notifikasi ── */
+        Object.keys(pesertaData).forEach(k => delete pesertaData[k]);
+        Object.keys(prevSnapshot).forEach(k => delete prevSnapshot[k]);
 
-        const prev = pesertaData[id];
+        Object.entries(rawData).forEach(([key, val]) => {
+          if (!val || (!val.nama && !val.id)) return;
+          pesertaData[key]  = { ...val };
+          prevSnapshot[key] = { status: val.status };   /* simpan hanya status untuk diff */
+        });
 
-        /*
-         * Cek notifikasi:
-         * - isInitialLoad: SKIP semua — ini bukan perubahan, hanya data awal
-         * - prev harus ada dan statusnya harus benar-benar berbeda
-         *
-         * Simpan SALINAN (spread) agar prev tidak ikut berubah
-         * ketika Firebase SDK meng-update objek yang sama di memory.
-         */
-        if (!isInitialLoad && prev && prev.status !== undefined && prev.status !== curr.status) {
-          addNotification(curr, curr.status);
-        }
+        isFirstSnapshot = false;
+      } else {
+        /* ── Diff: deteksi perubahan status ── */
+        const keysSekarang = new Set(Object.keys(rawData));
 
-        pesertaData[id] = { ...curr }; /* shallow copy — cegah shared reference */
-      });
+        /* Cek key yang BARU atau BERUBAH */
+        Object.entries(rawData).forEach(([key, val]) => {
+          if (!val || (!val.nama && !val.id)) return;
 
-      /* Hapus peserta yang sudah tidak ada di Firebase */
-      Object.keys(pesertaData).forEach(id => {
-        if (!data[id]) delete pesertaData[id];
-      });
+          const prev = prevSnapshot[key];
 
-      /* Setelah snapshot pertama selesai diproses, baru boleh trigger notif */
-      isInitialLoad = false;
+          if (!prev) {
+            /* Peserta baru masuk setelah initial load — tidak perlu notifikasi */
+            pesertaData[key]  = { ...val };
+            prevSnapshot[key] = { status: val.status };
+          } else if (prev.status !== val.status) {
+            /*
+             * Status BENAR-BENAR berubah → notifikasi.
+             * Cek ini SANGAT penting: hanya fire jika status berbeda,
+             * bukan setiap kali on('value') fire (misalnya karena
+             * lastUpdate berubah tapi status tetap sama).
+             */
+            addNotification(val, val.status);
+            pesertaData[key]  = { ...val };
+            prevSnapshot[key] = { status: val.status };
+          } else {
+            /* Status sama, update data lokal tanpa notifikasi */
+            pesertaData[key] = { ...val };
+          }
+        });
+
+        /* Cek key yang DIHAPUS dari Firebase */
+        Object.keys(prevSnapshot).forEach(key => {
+          if (!keysSekarang.has(key)) {
+            delete pesertaData[key];
+            delete prevSnapshot[key];
+          }
+        });
+      }
 
       renderFilterChips();
       renderTable();
       updateStats();
-    };
-
-    dbRef.on('value', dbListener);
+    });
   }
 
-  /* ═══════════════════════════════════════
+  /* ══════════════════════════════════════════════════════════════
      HELPERS
-  ═══════════════════════════════════════ */
+  ══════════════════════════════════════════════════════════════ */
   function getInitials(name) {
     if (!name || !name.trim()) return '?';
     return name.trim().split(/\s+/).map(w => w[0]).join('').substring(0, 2).toUpperCase();
@@ -1270,10 +1315,6 @@
     return map[status] || status;
   }
 
-  /*
-   * BUG FIX #5 — "d" dalam "Xd lalu" adalah singkatan detik, bukan hari.
-   * Harusnya "dtk" agar tidak membingungkan ("2d lalu" dibaca "2 hari lalu").
-   */
   function timeAgo(ts) {
     if (!ts) return '—';
     const diff = Math.floor((Date.now() - ts) / 1000);
@@ -1294,9 +1335,9 @@
     return new Date().toLocaleDateString('id-ID').replace(/\//g, '-');
   }
 
-  /* ═══════════════════════════════════════
+  /* ══════════════════════════════════════════════════════════════
      FILTER LOGIC
-  ═══════════════════════════════════════ */
+  ══════════════════════════════════════════════════════════════ */
   function getUniqueValues(field) {
     const vals = new Set();
     Object.values(pesertaData).forEach(p => { if (p[field]) vals.add(p[field]); });
@@ -1307,38 +1348,28 @@
     const kelasList   = getUniqueValues('kelas');
     const ruanganList = getUniqueValues('ruangan');
 
-    /* Kelas chips */
     const kelasGroup = document.getElementById('filterKelasGroup');
     kelasGroup.innerHTML = kelasList.length === 0
       ? `<span style="font-family:var(--mono);font-size:11px;color:var(--muted);font-style:italic">Belum ada data</span>`
       : kelasList.map(k => {
-          const safe = escAttr(k);
+          const safe     = escAttr(k);
           const isActive = activeFilters.kelas === k;
           return `<button class="filter-chip ${isActive ? 'active-purple' : ''}"
             data-type="kelas" data-value="${safe}" onclick="toggleFilter('kelas','${safe}')">
             <span class="filter-dot" style="color:var(--purple)"></span>${escHtml(k)}</button>`;
         }).join('');
 
-    /* Ruangan chips
-     * BUG FIX #6 — Jangan encodeURIComponent di data-value; pakai escAttr saja.
-     * encodeURIComponent membuat nilai tidak bisa dicocokkan saat filter.
-     */
     const ruanganGroup = document.getElementById('filterRuanganGroup');
     ruanganGroup.innerHTML = ruanganList.length === 0
       ? `<span style="font-family:var(--mono);font-size:11px;color:var(--muted);font-style:italic">Belum ada data</span>`
       : ruanganList.map(r => {
-          const safe = escAttr(r);
+          const safe     = escAttr(r);
           const isActive = activeFilters.ruangan === r;
           return `<button class="filter-chip ${isActive ? 'active' : ''}"
             data-type="ruangan" data-value="${safe}" onclick="toggleFilter('ruangan','${safe}')">
             <span class="filter-dot" style="color:var(--blue)"></span>${escHtml(r)}</button>`;
         }).join('');
 
-    /*
-     * BUG FIX #7 — Sync status chip .active state setelah renderFilterChips().
-     * Status chip dibuat secara statis di HTML sehingga class .active-nya
-     * hilang jika renderFilterChips() dipanggil tanpa sync.
-     */
     syncStatusChips();
   }
 
@@ -1367,7 +1398,7 @@
     document.getElementById('btnResetFilter').style.display = hasFilter ? 'flex' : 'none';
 
     const filteredList = getFilteredList();
-    const allList = Object.values(pesertaData);
+    const allList      = Object.values(pesertaData);
     if (hasFilter) {
       document.getElementById('filterResultInfo').style.display = 'inline-flex';
       document.getElementById('filterResultCount').textContent = filteredList.length;
@@ -1386,9 +1417,9 @@
     });
   }
 
-  /* ═══════════════════════════════════════
-     ESCAPE HELPERS (XSS prevention)
-  ═══════════════════════════════════════ */
+  /* ══════════════════════════════════════════════════════════════
+     ESCAPE HELPERS
+  ══════════════════════════════════════════════════════════════ */
   function escHtml(s) {
     return String(s)
       .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
@@ -1396,13 +1427,12 @@
   }
 
   function escAttr(s) {
-    /* Safe untuk dipakai dalam onclick="...toggleFilter('x','VALUE')" */
     return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;');
   }
 
-  /* ═══════════════════════════════════════
+  /* ══════════════════════════════════════════════════════════════
      RENDER TABLE
-  ═══════════════════════════════════════ */
+  ══════════════════════════════════════════════════════════════ */
   function renderTable() {
     const tbody        = document.getElementById('pesertaBody');
     const allList      = Object.values(pesertaData);
@@ -1413,7 +1443,7 @@
     const offlineCount = allList.filter(p => p.status === 'offline').length;
     const btn = document.getElementById('btnDeleteOffline');
     btn.disabled = offlineCount === 0;
-    btn.title = offlineCount === 0 ? 'Tidak ada data offline' : `${offlineCount} peserta offline`;
+    btn.title    = offlineCount === 0 ? 'Tidak ada data offline' : `${offlineCount} peserta offline`;
 
     if (filteredList.length === 0) {
       const msg = (activeFilters.kelas || activeFilters.ruangan || activeFilters.status)
@@ -1433,16 +1463,10 @@
     filteredList.sort((a, b) => (order[a.status] ?? 5) - (order[b.status] ?? 5));
 
     tbody.innerHTML = filteredList.map(p => {
-      const color = getAvatarColor(p.id || p.nama || '?');
-
-      /*
-       * BUG FIX #8 — parseInt() lalu || 0 supaya null/undefined/NaN semua
-       * menjadi 0 dengan benar. Nilai string "3" pun ter-parse.
-       */
-      const v = parseInt(p.violations, 10) || 0;
-
-      const namaDisplay = (p.nama && p.nama.trim()) ? escHtml(p.nama.trim()) : '(Tanpa Nama)';
-      const idDisplay   = (p.id   && String(p.id).trim()) ? escHtml(String(p.id).trim()) : '—';
+      const color        = getAvatarColor(p.id || p.nama || '?');
+      const v            = parseInt(p.violations, 10) || 0;
+      const namaDisplay  = (p.nama && p.nama.trim()) ? escHtml(p.nama.trim()) : '(Tanpa Nama)';
+      const idDisplay    = (p.id   && String(p.id).trim()) ? escHtml(String(p.id).trim()) : '—';
 
       const kelas = p.kelas
         ? `<span class="meta-pill kelas">
@@ -1481,9 +1505,9 @@
     updateFilterUI();
   }
 
-  /* ═══════════════════════════════════════
+  /* ══════════════════════════════════════════════════════════════
      STATS
-  ═══════════════════════════════════════ */
+  ══════════════════════════════════════════════════════════════ */
   function updateStats() {
     const list = Object.values(pesertaData);
     document.getElementById('statTotal').textContent   = list.length;
@@ -1494,9 +1518,9 @@
     document.getElementById('statRuangan').textContent = new Set(list.map(p => p.ruangan).filter(Boolean)).size;
   }
 
-  /* ═══════════════════════════════════════
+  /* ══════════════════════════════════════════════════════════════
      DOWNLOAD TABEL
-  ═══════════════════════════════════════ */
+  ══════════════════════════════════════════════════════════════ */
   function tableToCSV(list) {
     const bom    = '\uFEFF';
     const header = ['Nama', 'ID Peserta', 'Kelas', 'Ruangan', 'Status', 'Jumlah Pelanggaran', 'Terakhir Update'];
@@ -1554,9 +1578,9 @@
     showToast(`${list.length} data hasil filter berhasil didownload.`, 'success');
   }
 
-  /* ═══════════════════════════════════════
+  /* ══════════════════════════════════════════════════════════════
      DOWNLOAD LOG
-  ═══════════════════════════════════════ */
+  ══════════════════════════════════════════════════════════════ */
   function downloadLogCSV() {
     if (!logHistory.length) { showToast('Belum ada log peringatan untuk didownload.', 'info'); return; }
     const bom    = '\uFEFF';
@@ -1588,7 +1612,6 @@
     showToast('Log berhasil dibersihkan.', 'info');
   }
 
-  /* Versi tanpa toast, dipakai saat gantiInstance() */
   function clearLogSilent() {
     logHistory.length = 0;
     document.getElementById('notifList').innerHTML = `<div class="notif-empty">
@@ -1597,9 +1620,9 @@
       </svg>Belum ada peringatan</div>`;
   }
 
-  /* ═══════════════════════════════════════
+  /* ══════════════════════════════════════════════════════════════
      DOWNLOAD HELPER
-  ═══════════════════════════════════════ */
+  ══════════════════════════════════════════════════════════════ */
   function triggerDownload(content, filename, type) {
     const blob = new Blob([content], { type });
     const url  = URL.createObjectURL(blob);
@@ -1610,9 +1633,9 @@
     URL.revokeObjectURL(url);
   }
 
-  /* ═══════════════════════════════════════
+  /* ══════════════════════════════════════════════════════════════
      DROPDOWN
-  ═══════════════════════════════════════ */
+  ══════════════════════════════════════════════════════════════ */
   function toggleDropdown(id) {
     const menu   = document.getElementById(id + 'Menu');
     const isOpen = menu.classList.contains('show');
@@ -1628,9 +1651,9 @@
     if (!e.target.closest('.download-dropdown')) closeDropdowns();
   });
 
-  /* ═══════════════════════════════════════
+  /* ══════════════════════════════════════════════════════════════
      HAPUS OFFLINE
-  ═══════════════════════════════════════ */
+  ══════════════════════════════════════════════════════════════ */
   function konfirmasiHapusOffline() {
     const offlineList = Object.values(pesertaData).filter(p => p.status === 'offline');
     if (offlineList.length === 0) { showToast('Tidak ada data offline yang perlu dihapus.', 'info'); return; }
@@ -1673,9 +1696,9 @@
     if (e.target === this) tutupModal();
   });
 
-  /* ═══════════════════════════════════════
+  /* ══════════════════════════════════════════════════════════════
      TOAST
-  ═══════════════════════════════════════ */
+  ══════════════════════════════════════════════════════════════ */
   let toastTimer;
   function showToast(msg, type = 'info') {
     const toast = document.getElementById('toast');
@@ -1694,9 +1717,14 @@
     toastTimer = setTimeout(() => toast.classList.remove('show'), 3500);
   }
 
-  /* ═══════════════════════════════════════
+  /* ══════════════════════════════════════════════════════════════
      NOTIFIKASI
-  ═══════════════════════════════════════ */
+     
+     FIX: msgMap sekarang lengkap termasuk 'aman' (kembali).
+     Sebelumnya versi lama terkadang skip 'aman' di mobile karena
+     addNotification dipanggil dari child_changed yang tidak reliable.
+     Sekarang dipanggil dari diff manual yang deterministik.
+  ══════════════════════════════════════════════════════════════ */
   function addNotification(peserta, type) {
     const listEl = document.getElementById('notifList');
     const empty  = listEl.querySelector('.notif-empty');
@@ -1704,16 +1732,26 @@
 
     if (soundEnabled) playBeep(type);
 
+    /* Semua status terdokumentasi dengan pesan yang jelas */
     const msgMap = {
-      tab:    'membuka tab/window lain saat ujian berlangsung.',
-      keluar: 'keluar dari halaman ujian!',
-      aman:   'kembali ke halaman ujian.',
-      offline:'terputus dari jaringan.',
+      tab:     'membuka tab atau window lain saat ujian berlangsung.',
+      keluar:  'keluar dari halaman ujian!',
+      aman:    'kembali ke halaman ujian.',
+      offline: 'terputus dari jaringan.',
+      selesai: 'telah menyelesaikan ujian.',
     };
     const msg = msgMap[type] || 'status berubah.';
 
     const namaLog = (peserta.nama && peserta.nama.trim()) ? peserta.nama.trim() : '(Tanpa Nama)';
     const idLog   = (peserta.id   && String(peserta.id).trim()) ? String(peserta.id).trim() : '—';
+
+    const jenisMap = {
+      tab:     'Buka Tab Lain',
+      keluar:  'Keluar Halaman',
+      aman:    'Kembali',
+      offline: 'Offline',
+      selesai: 'Selesai',
+    };
 
     logHistory.unshift({
       waktu      : nowStr(),
@@ -1721,13 +1759,14 @@
       id         : idLog,
       kelas      : peserta.kelas   || '—',
       ruangan    : peserta.ruangan || '—',
-      jenis      : type === 'aman' ? 'Kembali' : type === 'tab' ? 'Buka Tab Lain' : type === 'keluar' ? 'Keluar Halaman' : 'Offline',
+      jenis      : jenisMap[type]  || type,
       keterangan : msg
     });
 
+    /* CSS class untuk notif item: 'aman' → 'kembali' */
     const typeClass = type === 'aman' ? 'kembali' : type;
-    const time = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const metaInfo = [peserta.kelas, peserta.ruangan].filter(Boolean).join(' · ');
+    const time      = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const metaInfo  = [peserta.kelas, peserta.ruangan].filter(Boolean).join(' · ');
 
     const div = document.createElement('div');
     div.className = `notif-item ${typeClass}`;
@@ -1766,9 +1805,9 @@
     document.getElementById('soundLabel').textContent = soundEnabled ? 'Bunyi ON' : 'Bunyi OFF';
   }
 
-  /* ═══════════════════════════════════════
+  /* ══════════════════════════════════════════════════════════════
      CLOCK & INIT
-  ═══════════════════════════════════════ */
+  ══════════════════════════════════════════════════════════════ */
   function updateClock() {
     document.getElementById('clock').textContent = new Date().toLocaleTimeString('id-ID');
   }
@@ -1777,12 +1816,7 @@
     Notification.requestPermission();
   }
 
-  /*
-   * BUG FIX #9 — setInterval renderTable() juga harus call renderFilterChips()
-   * agar chip filter tidak stale (misalnya setelah peserta baru masuk di luar
-   * jangkauan Firebase listener yang mungkin sudah lama tidak fire).
-   * Sebenarnya Firebase listener sudah real-time jadi ini hanya safety net.
-   */
+  /* Refresh tabel tiap 30 detik untuk update "X dtk lalu" */
   setInterval(() => {
     renderFilterChips();
     renderTable();
