@@ -1,0 +1,1777 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Panel Pengawas — Monitor Ujian</title>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0d0f14;
+    --surface: #151821;
+    --card: #1a1f2e;
+    --border: rgba(255,255,255,0.07);
+    --accent: #4ade80;
+    --accent-dim: rgba(74,222,128,0.12);
+    --warn: #fbbf24;
+    --warn-dim: rgba(251,191,36,0.12);
+    --danger: #f87171;
+    --danger-dim: rgba(248,113,113,0.12);
+    --blue: #60a5fa;
+    --blue-dim: rgba(96,165,250,0.12);
+    --purple: #a78bfa;
+    --purple-dim: rgba(167,139,250,0.12);
+    --text: #e2e8f0;
+    --muted: #64748b;
+    --mono: 'JetBrains Mono', monospace;
+    --sans: 'Syne', sans-serif;
+  }
+
+  body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── SELECTOR OVERLAY ── */
+  #selectorOverlay {
+    position: fixed; inset: 0; z-index: 9000;
+    background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+    padding: 16px;
+    overflow-y: auto;
+  }
+
+  .selector-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 32px 24px;
+    max-width: 580px; width: 100%;
+    box-shadow: 0 40px 80px rgba(0,0,0,0.6);
+    margin: auto;
+  }
+
+  .selector-logo {
+    display: flex; align-items: center; gap: 14px;
+    margin-bottom: 28px;
+  }
+
+  .selector-logo-icon {
+    width: 44px; height: 44px;
+    background: var(--accent);
+    border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .selector-logo-icon svg { width: 22px; height: 22px; color: #0d0f14; }
+  .selector-title { font-size: 20px; font-weight: 800; letter-spacing: -0.5px; }
+  .selector-sub   { font-size: 12px; color: var(--muted); font-family: var(--mono); margin-top: 3px; }
+
+  .selector-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 12px;
+  }
+
+  .instance-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+
+  @media (max-width: 480px) {
+    .instance-grid { grid-template-columns: 1fr; }
+  }
+
+  .instance-btn {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 16px;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: left;
+    display: flex; flex-direction: column; gap: 6px;
+    width: 100%;
+  }
+
+  .instance-btn:hover {
+    background: var(--blue-dim);
+    border-color: rgba(96,165,250,0.35);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(96,165,250,0.1);
+  }
+
+  .instance-btn.active {
+    background: var(--blue-dim);
+    border-color: rgba(96,165,250,0.5);
+    box-shadow: 0 0 0 2px rgba(96,165,250,0.2);
+  }
+
+  .instance-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text);
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  .instance-num {
+    width: 22px; height: 22px;
+    background: var(--blue-dim);
+    border: 1px solid rgba(96,165,250,0.25);
+    color: var(--blue);
+    border-radius: 6px;
+    font-family: var(--mono);
+    font-size: 11px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .instance-btn.active .instance-num {
+    background: var(--blue);
+    color: #0d0f14;
+    border-color: var(--blue);
+  }
+
+  .instance-db {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .btn-masuk {
+    width: 100%;
+    padding: 14px;
+    background: var(--accent);
+    border: none;
+    border-radius: 10px;
+    color: #0d0f14;
+    font-family: var(--mono);
+    font-size: 14px; font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    min-height: 48px;
+  }
+
+  .btn-masuk:hover { background: #86efac; transform: translateY(-1px); }
+  .btn-masuk:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+  .btn-masuk svg { width: 16px; height: 16px; flex-shrink: 0; }
+
+  .selector-note {
+    margin-top: 16px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    text-align: center;
+    line-height: 1.6;
+  }
+
+  /* ── MAIN APP ── */
+  #appContainer { display: none; }
+
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    gap: 10px;
+  }
+
+  .logo { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+
+  .logo-icon {
+    width: 32px; height: 32px;
+    background: var(--accent);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .logo-icon svg { width: 16px; height: 16px; color: #0d0f14; }
+  .logo-text { font-size: 16px; font-weight: 800; letter-spacing: -0.5px; }
+  .logo-sub  { font-size: 10px; color: var(--muted); font-family: var(--mono); margin-top: 1px; display: none; }
+
+  @media (min-width: 600px) {
+    .logo-sub { display: block; }
+    header { padding: 14px 24px; }
+  }
+
+  .header-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+
+  .instance-badge {
+    display: flex; align-items: center; gap: 5px;
+    background: var(--blue-dim);
+    border: 1px solid rgba(96,165,250,0.3);
+    color: var(--blue);
+    padding: 5px 10px;
+    border-radius: 20px;
+    font-family: var(--mono);
+    font-size: 10px; font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .instance-badge:hover { background: rgba(96,165,250,0.2); }
+  .instance-badge svg { width: 11px; height: 11px; flex-shrink: 0; }
+
+  .live-badge {
+    display: flex; align-items: center; gap: 5px;
+    background: var(--accent-dim);
+    border: 1px solid rgba(74,222,128,0.3);
+    color: var(--accent);
+    padding: 5px 10px;
+    border-radius: 20px;
+    font-family: var(--mono);
+    font-size: 10px; font-weight: 600;
+  }
+
+  .live-dot {
+    width: 6px; height: 6px;
+    background: var(--accent);
+    border-radius: 50%;
+    animation: pulse 1.5s ease infinite;
+    flex-shrink: 0;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.8); }
+  }
+
+  .clock { font-family: var(--mono); font-size: 12px; color: var(--muted); white-space: nowrap; }
+
+  main { padding: 16px; max-width: 1400px; margin: 0 auto; }
+
+  @media (min-width: 600px) { main { padding: 24px; } }
+  @media (min-width: 1024px) { main { padding: 28px 32px; } }
+
+  /* ── STATS ── */
+  .stats-row {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+
+  @media (min-width: 480px) { .stats-row { grid-template-columns: repeat(3, 1fr); } }
+  @media (min-width: 900px) { .stats-row { grid-template-columns: repeat(6, 1fr); gap: 14px; } }
+
+  .stat-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 16px;
+  }
+
+  .stat-label {
+    font-size: 9px; color: var(--muted);
+    font-family: var(--mono);
+    text-transform: uppercase; letter-spacing: 0.8px;
+    margin-bottom: 6px;
+  }
+
+  @media (min-width: 600px) {
+    .stat-label { font-size: 10px; }
+    .stat-card  { padding: 18px 20px; }
+  }
+
+  .stat-value { font-size: 24px; font-weight: 800; line-height: 1; }
+
+  @media (min-width: 600px) { .stat-value { font-size: 28px; } }
+
+  .stat-value.green  { color: var(--accent); }
+  .stat-value.yellow { color: var(--warn); }
+  .stat-value.red    { color: var(--danger); }
+  .stat-value.blue   { color: var(--blue); }
+  .stat-value.purple { color: var(--purple); }
+  .stat-value.white  { color: var(--text); }
+
+  /* ── FILTER BAR ── */
+  .filter-bar {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin-bottom: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  @media (min-width: 768px) {
+    .filter-bar { flex-direction: row; align-items: center; flex-wrap: wrap; padding: 14px 20px; gap: 12px; }
+  }
+
+  .filter-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    white-space: nowrap;
+    display: flex; align-items: center; gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .filter-label svg { width: 13px; height: 13px; }
+
+  .filter-sep {
+    display: none;
+  }
+
+  @media (min-width: 768px) {
+    .filter-sep { display: block; width: 1px; height: 24px; background: var(--border); flex-shrink: 0; }
+  }
+
+  .filter-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  @media (min-width: 768px) {
+    .filter-section { flex-direction: row; align-items: center; gap: 8px; }
+  }
+
+  .filter-section-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .filter-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+  .filter-chip {
+    display: flex; align-items: center; gap: 5px;
+    padding: 5px 10px; border-radius: 20px;
+    font-family: var(--mono); font-size: 10px; font-weight: 600;
+    cursor: pointer; border: 1px solid var(--border);
+    background: transparent; color: var(--muted);
+    transition: all 0.15s; white-space: nowrap;
+    min-height: 32px;
+  }
+
+  .filter-chip:hover { background: rgba(255,255,255,0.05); color: var(--text); border-color: rgba(255,255,255,0.15); }
+  .filter-chip.active { background: var(--blue-dim); color: var(--blue); border-color: rgba(96,165,250,0.35); }
+  .filter-chip.active-purple { background: var(--purple-dim); color: var(--purple); border-color: rgba(167,139,250,0.35); }
+  .filter-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+
+  .filter-footer {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+
+  .filter-reset {
+    display: flex; align-items: center; gap: 5px;
+    padding: 5px 10px; border-radius: 20px;
+    font-family: var(--mono); font-size: 10px; font-weight: 600;
+    cursor: pointer; border: 1px solid rgba(248,113,113,0.25);
+    background: var(--danger-dim); color: var(--danger); transition: all 0.15s; white-space: nowrap;
+    min-height: 32px;
+  }
+
+  .filter-reset:hover { background: rgba(248,113,113,0.2); }
+  .filter-reset svg { width: 11px; height: 11px; flex-shrink: 0; }
+
+  .filter-result-info {
+    font-family: var(--mono); font-size: 10px; color: var(--muted);
+    padding: 5px 10px; border-radius: 6px;
+    background: rgba(255,255,255,0.03); border: 1px solid var(--border); white-space: nowrap;
+  }
+
+  .filter-result-info b { color: var(--blue); }
+
+  /* ── LAYOUT ── */
+  .sections {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  @media (min-width: 1100px) {
+    .sections { grid-template-columns: 1fr 360px; gap: 20px; }
+  }
+
+  .panel { background: var(--card); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+
+  .panel-header {
+    padding: 14px 16px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;
+  }
+
+  @media (min-width: 600px) { .panel-header { padding: 16px 20px; } }
+
+  .panel-title { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  .panel-title svg { width: 15px; height: 15px; opacity: 0.7; flex-shrink: 0; }
+  .panel-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+  .count-badge { font-family: var(--mono); font-size: 10px; padding: 3px 8px; border-radius: 6px; background: rgba(255,255,255,0.06); color: var(--muted); }
+
+  /* ── BUTTONS ── */
+  .btn-action {
+    display: flex; align-items: center; gap: 5px;
+    border-radius: 8px; padding: 6px 10px;
+    font-family: var(--mono); font-size: 10px; font-weight: 600;
+    cursor: pointer; transition: all 0.15s; white-space: nowrap; border: 1px solid;
+    min-height: 34px;
+  }
+
+  .btn-action:hover { transform: translateY(-1px); }
+  .btn-action:active { transform: translateY(0); }
+  .btn-action:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+  .btn-action svg { width: 12px; height: 12px; flex-shrink: 0; }
+
+  .btn-delete-offline { background: var(--danger-dim); border-color: rgba(248,113,113,0.25); color: var(--danger); }
+  .btn-delete-offline:hover { background: rgba(248,113,113,0.2); border-color: rgba(248,113,113,0.5); }
+
+  .btn-download-table { background: rgba(96,165,250,0.1); border-color: rgba(96,165,250,0.25); color: var(--blue); }
+  .btn-download-table:hover { background: rgba(96,165,250,0.18); border-color: rgba(96,165,250,0.5); }
+
+  .btn-download-log { background: rgba(251,191,36,0.1); border-color: rgba(251,191,36,0.25); color: var(--warn); }
+  .btn-download-log:hover { background: rgba(251,191,36,0.18); border-color: rgba(251,191,36,0.5); }
+
+  /* ── DROPDOWN ── */
+  .download-dropdown { position: relative; display: inline-block; }
+
+  .download-menu {
+    display: none; position: absolute; right: 0; top: calc(100% + 6px);
+    background: #1e2333; border: 1px solid rgba(96,165,250,0.25);
+    border-radius: 10px; padding: 6px; z-index: 200; min-width: 190px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.6); animation: fadeDown 0.15s ease;
+  }
+
+  .download-menu.show { display: block; }
+
+  @keyframes fadeDown { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+
+  .download-menu-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 9px 12px; border-radius: 7px;
+    font-family: var(--mono); font-size: 11px; font-weight: 600;
+    cursor: pointer; color: var(--text); transition: background 0.12s; white-space: nowrap;
+    min-height: 38px;
+  }
+
+  .download-menu-item:hover { background: rgba(255,255,255,0.06); }
+  .download-menu-item svg { width: 13px; height: 13px; opacity: 0.7; flex-shrink: 0; }
+  .download-menu-sep { height: 1px; background: var(--border); margin: 4px 0; }
+
+  /* ── TOAST ── */
+  .toast {
+    position: fixed; bottom: 20px; right: 16px; left: 16px; z-index: 9999;
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 16px; border-radius: 10px;
+    font-size: 12px; font-weight: 600; font-family: var(--mono);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    transform: translateY(16px); opacity: 0;
+    transition: all 0.25s cubic-bezier(0.34,1.56,0.64,1);
+    pointer-events: none;
+  }
+
+  @media (min-width: 600px) {
+    .toast { left: auto; right: 28px; max-width: 360px; bottom: 28px; font-size: 13px; }
+  }
+
+  .toast.show { transform: translateY(0); opacity: 1; }
+  .toast.success { background: #14532d; border: 1px solid rgba(74,222,128,0.3); color: var(--accent); }
+  .toast.error   { background: #450a0a; border: 1px solid rgba(248,113,113,0.3); color: var(--danger); }
+  .toast.info    { background: #1e3a5f; border: 1px solid rgba(96,165,250,0.3); color: var(--blue); }
+  .toast svg { width: 15px; height: 15px; flex-shrink: 0; }
+
+  /* ── MODAL ── */
+  .modal-backdrop {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.6); z-index: 500;
+    align-items: center; justify-content: center;
+    padding: 16px; backdrop-filter: blur(6px);
+  }
+
+  .modal-backdrop.show { display: flex; }
+
+  .modal-card {
+    background: #1a1f2e; border: 1px solid rgba(248,113,113,0.25);
+    border-radius: 16px; padding: 24px; max-width: 400px; width: 100%;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5); animation: modalIn 0.2s ease;
+  }
+
+  @keyframes modalIn { from { opacity: 0; transform: scale(0.94) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+
+  .modal-icon {
+    width: 48px; height: 48px; background: var(--danger-dim);
+    border: 1px solid rgba(248,113,113,0.2); border-radius: 14px;
+    display: flex; align-items: center; justify-content: center; margin-bottom: 16px;
+  }
+
+  .modal-icon svg { width: 22px; height: 22px; color: var(--danger); }
+  .modal-title { font-size: 16px; font-weight: 800; margin-bottom: 8px; }
+  .modal-desc { font-size: 13px; color: var(--muted); line-height: 1.65; margin-bottom: 8px; }
+
+  .modal-count {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--danger-dim); border: 1px solid rgba(248,113,113,0.2);
+    color: var(--danger); font-family: var(--mono); font-size: 12px; font-weight: 600;
+    padding: 5px 12px; border-radius: 6px; margin-bottom: 22px;
+  }
+
+  .modal-buttons { display: flex; gap: 10px; }
+
+  .btn-cancel {
+    flex: 1; padding: 11px; background: rgba(255,255,255,0.05);
+    border: 1px solid var(--border); border-radius: 8px;
+    color: var(--muted); font-family: var(--mono); font-size: 13px; font-weight: 600;
+    cursor: pointer; transition: all 0.15s; min-height: 44px;
+  }
+
+  .btn-cancel:hover { background: rgba(255,255,255,0.08); color: var(--text); }
+
+  .btn-confirm-delete {
+    flex: 1; padding: 11px; background: var(--danger); border: none; border-radius: 8px;
+    color: #0d0f14; font-family: var(--mono); font-size: 13px; font-weight: 700;
+    cursor: pointer; transition: all 0.15s; min-height: 44px;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+  }
+
+  .btn-confirm-delete:hover { background: #fca5a5; }
+  .btn-confirm-delete:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-confirm-delete svg { width: 14px; height: 14px; flex-shrink: 0; }
+
+  /* ── TABLE ── */
+  .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+  .peserta-table { width: 100%; border-collapse: collapse; min-width: 540px; }
+
+  .peserta-table th {
+    padding: 10px 14px; text-align: left;
+    font-size: 10px; font-family: var(--mono); color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.6px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(255,255,255,0.02); white-space: nowrap;
+  }
+
+  .peserta-row { border-bottom: 1px solid var(--border); transition: background 0.15s; }
+  .peserta-row:hover { background: rgba(255,255,255,0.025); }
+  .peserta-row:last-child { border-bottom: none; }
+  .peserta-row td { padding: 11px 14px; font-size: 13px; vertical-align: middle; }
+
+  .avatar {
+    width: 30px; height: 30px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; flex-shrink: 0;
+  }
+
+  .peserta-info { display: flex; align-items: center; gap: 9px; }
+  .peserta-name { font-weight: 600; font-size: 13px; }
+  .peserta-id   { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+
+  .meta-pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 7px; border-radius: 5px;
+    font-family: var(--mono); font-size: 10px; font-weight: 600; white-space: nowrap;
+  }
+
+  .meta-pill.kelas   { background: var(--purple-dim); color: var(--purple); border: 1px solid rgba(167,139,250,0.2); }
+  .meta-pill.ruangan { background: var(--blue-dim); color: var(--blue); border: 1px solid rgba(96,165,250,0.2); margin-left: 3px; }
+  .meta-pill svg { width: 9px; height: 9px; }
+
+  .status-pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 9px; border-radius: 6px;
+    font-size: 10px; font-family: var(--mono); font-weight: 600; white-space: nowrap;
+  }
+
+  .status-pill.aman    { background: var(--accent-dim); color: var(--accent); border: 1px solid rgba(74,222,128,0.2); }
+  .status-pill.tab     { background: var(--warn-dim); color: var(--warn); border: 1px solid rgba(251,191,36,0.2); animation: blink-warn 1.5s ease infinite; }
+  .status-pill.keluar  { background: var(--danger-dim); color: var(--danger); border: 1px solid rgba(248,113,113,0.2); animation: blink-warn 1s ease infinite; }
+  .status-pill.offline { background: rgba(100,116,139,0.15); color: var(--muted); border: 1px solid rgba(100,116,139,0.2); }
+  .status-pill.selesai { background: rgba(96,165,250,0.12); color: var(--blue); border: 1px solid rgba(96,165,250,0.2); }
+
+  @keyframes blink-warn { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+
+  .status-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+  .violation-count { font-family: var(--mono); font-size: 12px; color: var(--muted); text-align: center; }
+  .violation-count.has-violations { color: var(--danger); font-weight: 600; }
+  .time-cell { font-family: var(--mono); font-size: 10px; color: var(--muted); white-space: nowrap; }
+
+  /* ── NOTIF PANEL ── */
+  .notif-panel { display: flex; flex-direction: column; }
+  .notif-list-wrap { height: 400px; overflow-y: auto; }
+
+  @media (min-width: 1100px) {
+    .notif-list-wrap { height: 600px; }
+  }
+
+  .notif-list  { padding: 12px; display: flex; flex-direction: column; gap: 8px; min-height: 100%; }
+  .notif-list::-webkit-scrollbar { width: 4px; }
+  .notif-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+  .notif-item { border-radius: 10px; padding: 11px 13px; animation: slideIn 0.3s ease; }
+
+  @keyframes slideIn { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: translateX(0); } }
+
+  .notif-item.tab     { background: var(--warn-dim); border: 1px solid rgba(251,191,36,0.2); }
+  .notif-item.keluar  { background: var(--danger-dim); border: 1px solid rgba(248,113,113,0.2); }
+  .notif-item.kembali { background: var(--accent-dim); border: 1px solid rgba(74,222,128,0.15); }
+
+  .notif-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+  .notif-name { font-size: 12px; font-weight: 700; }
+  .notif-item.tab .notif-name     { color: var(--warn); }
+  .notif-item.keluar .notif-name  { color: var(--danger); }
+  .notif-item.kembali .notif-name { color: var(--accent); }
+  .notif-time { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+  .notif-msg  { font-size: 12px; color: var(--muted); line-height: 1.4; }
+  .notif-meta { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-top: 4px; opacity: 0.7; }
+
+  .notif-empty {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    min-height: 160px; gap: 8px; color: var(--muted); font-size: 13px;
+  }
+
+  .notif-empty svg { width: 28px; height: 28px; opacity: 0.3; }
+
+  .sound-btn {
+    background: rgba(255,255,255,0.05); border: 1px solid var(--border);
+    border-radius: 6px; padding: 5px 9px; color: var(--muted);
+    font-family: var(--mono); font-size: 10px; cursor: pointer;
+    display: flex; align-items: center; gap: 5px; transition: all 0.15s;
+    min-height: 32px;
+  }
+
+  .sound-btn:hover { background: rgba(255,255,255,0.08); color: var(--text); }
+  .sound-btn svg { width: 12px; height: 12px; flex-shrink: 0; }
+
+  .empty-state {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 48px 20px; gap: 12px; color: var(--muted);
+  }
+
+  .empty-state svg { width: 36px; height: 36px; opacity: 0.3; }
+  .empty-state p { font-size: 13px; text-align: center; line-height: 1.5; }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spin { animation: spin 0.7s linear infinite; }
+
+  /* scroll indicator di mobile */
+  .table-scroll-hint {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    padding: 6px 14px;
+    text-align: right;
+    border-top: 1px solid var(--border);
+  }
+  @media (min-width: 700px) { .table-scroll-hint { display: none; } }
+</style>
+</head>
+<body>
+
+<!-- ══ SELECTOR OVERLAY ══ -->
+<div id="selectorOverlay">
+  <div class="selector-card">
+    <div class="selector-logo">
+      <div class="selector-logo-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
+      </div>
+      <div>
+        <div class="selector-title">Panel Pengawas</div>
+        <div class="selector-sub">Monitor Ujian — Real-time</div>
+      </div>
+    </div>
+
+    <div class="selector-label">Pilih Instance Firebase</div>
+
+    <div class="instance-grid">
+      <button class="instance-btn" data-instance="1" onclick="pilihInstance(1)">
+        <div class="instance-name"><span class="instance-num">1</span>Ruang 1,2,3,4</div>
+        <div class="instance-db">pengawas-asaj-default-rtdb</div>
+      </button>
+      <button class="instance-btn" data-instance="2" onclick="pilihInstance(2)">
+        <div class="instance-name"><span class="instance-num">2</span>Ruang 5,6,7,8</div>
+        <div class="instance-db">pengawas-asaj2-default-rtdb</div>
+      </button>
+      <button class="instance-btn" data-instance="3" onclick="pilihInstance(3)">
+        <div class="instance-name"><span class="instance-num">3</span>Ruang 9,10,11,12</div>
+        <div class="instance-db">pengawas-asaj3-default-rtdb</div>
+      </button>
+      <button class="instance-btn" data-instance="4" onclick="pilihInstance(4)">
+        <div class="instance-name"><span class="instance-num">4</span>Ruang 13,14,15,16</div>
+        <div class="instance-db">pengawas-asaj4-default-rtdb</div>
+      </button>
+      <button class="instance-btn" data-instance="5" onclick="pilihInstance(5)">
+        <div class="instance-name"><span class="instance-num">5</span>Ruang 17,18,19,20</div>
+        <div class="instance-db">pengawas-asaj5-default-rtdb</div>
+      </button>
+    </div>
+
+    <button class="btn-masuk" id="btnMasuk" onclick="masukKePanel()" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
+        <polyline points="10 17 15 12 10 7"/>
+        <line x1="15" y1="12" x2="3" y2="12"/>
+      </svg>
+      Masuk ke Panel
+    </button>
+
+    <div class="selector-note">
+      Pilih instance yang sesuai dengan sesi ujian.<br>
+      Tap badge instance di header untuk ganti instance.
+    </div>
+  </div>
+</div>
+
+<!-- ══ MAIN APP ══ -->
+<div id="appContainer">
+  <header>
+    <div class="logo">
+      <div class="logo-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
+      </div>
+      <div>
+        <div class="logo-text">Pengawas</div>
+        <div class="logo-sub">Monitor Ujian Real-time</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="instance-badge" onclick="gantiInstance()" title="Ganti instance">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <ellipse cx="12" cy="5" rx="9" ry="3"/>
+          <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
+          <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+        </svg>
+        <span id="headerInstanceName">Instance 1</span>
+      </div>
+      <div class="live-badge"><div class="live-dot"></div>LIVE</div>
+      <div class="clock" id="clock">--:--:--</div>
+    </div>
+  </header>
+
+  <main>
+    <!-- STATS -->
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="stat-label">Total Peserta</div>
+        <div class="stat-value blue" id="statTotal">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Sedang Ujian</div>
+        <div class="stat-value green" id="statAman">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Buka Tab Lain</div>
+        <div class="stat-value yellow" id="statTab">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Keluar Halaman</div>
+        <div class="stat-value red" id="statKeluar">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Kelas Aktif</div>
+        <div class="stat-value purple" id="statKelas">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Ruangan Aktif</div>
+        <div class="stat-value white" id="statRuangan">0</div>
+      </div>
+    </div>
+
+    <!-- FILTER BAR -->
+    <div class="filter-bar">
+      <div class="filter-label">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
+        </svg>
+        Filter
+      </div>
+
+      <div class="filter-section">
+        <span class="filter-section-label">Kelas:</span>
+        <div class="filter-group" id="filterKelasGroup">
+          <span style="font-family:var(--mono);font-size:11px;color:var(--muted);font-style:italic">Menunggu data...</span>
+        </div>
+      </div>
+
+      <div class="filter-section">
+        <span class="filter-section-label">Ruangan:</span>
+        <div class="filter-group" id="filterRuanganGroup">
+          <span style="font-family:var(--mono);font-size:11px;color:var(--muted);font-style:italic">Menunggu data...</span>
+        </div>
+      </div>
+
+      <div class="filter-section">
+        <span class="filter-section-label">Status:</span>
+        <div class="filter-group" id="filterStatusGroup">
+          <button class="filter-chip" data-type="status" data-value="aman"    onclick="toggleFilter('status','aman')">   <span class="filter-dot" style="color:#4ade80"></span> Aman</button>
+          <button class="filter-chip" data-type="status" data-value="tab"     onclick="toggleFilter('status','tab')">    <span class="filter-dot" style="color:#fbbf24"></span> Tab</button>
+          <button class="filter-chip" data-type="status" data-value="keluar"  onclick="toggleFilter('status','keluar')"> <span class="filter-dot" style="color:#f87171"></span> Keluar</button>
+          <button class="filter-chip" data-type="status" data-value="offline" onclick="toggleFilter('status','offline')"><span class="filter-dot" style="color:#64748b"></span> Offline</button>
+          <button class="filter-chip" data-type="status" data-value="selesai" onclick="toggleFilter('status','selesai')"><span class="filter-dot" style="color:#60a5fa"></span> Selesai</button>
+        </div>
+      </div>
+
+      <div class="filter-footer">
+        <button class="filter-reset" onclick="resetFilter()" id="btnResetFilter" style="display:none">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+          Reset
+        </button>
+        <div class="filter-result-info" id="filterResultInfo" style="display:none">
+          <b id="filterResultCount">0</b> / <b id="filterTotalCount">0</b> peserta
+        </div>
+      </div>
+    </div>
+
+    <div class="sections">
+      <!-- PANEL PESERTA -->
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+            </svg>
+            Daftar Peserta
+            <span class="count-badge" id="pesertaCount">0 peserta</span>
+          </div>
+          <div class="panel-actions">
+            <div class="download-dropdown" id="tableDropdown">
+              <button class="btn-action btn-download-table" onclick="toggleDropdown('tableDropdown')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="7 10 12 15 17 10"/>
+                  <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                Unduh
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:10px;height:10px">
+                  <path d="M6 9l6 6 6-6"/>
+                </svg>
+              </button>
+              <div class="download-menu" id="tableDropdownMenu">
+                <div class="download-menu-item" onclick="downloadTableCSV(); closeDropdowns()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  Download CSV
+                </div>
+                <div class="download-menu-item" onclick="downloadTableJSON(); closeDropdowns()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  Download JSON
+                </div>
+                <div class="download-menu-sep"></div>
+                <div class="download-menu-item" onclick="downloadTableViolationsOnly(); closeDropdowns()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+                  Hanya Pelanggar
+                </div>
+                <div class="download-menu-sep"></div>
+                <div class="download-menu-item" onclick="downloadTableFiltered(); closeDropdowns()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                  Hasil Filter
+                </div>
+              </div>
+            </div>
+            <button class="btn-action btn-delete-offline" id="btnDeleteOffline" onclick="konfirmasiHapusOffline()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <polyline points="3 6 5 6 21 6"/>
+                <path d="M19 6l-1 14H6L5 6"/>
+                <path d="M10 11v6M14 11v6"/>
+                <path d="M9 6V4h6v2"/>
+              </svg>
+              Hapus Offline
+            </button>
+          </div>
+        </div>
+        <div class="table-scroll">
+          <table class="peserta-table">
+            <thead>
+              <tr>
+                <th>Peserta</th>
+                <th>Kelas / Ruangan</th>
+                <th>Status</th>
+                <th>Pelanggaran</th>
+                <th>Update</th>
+              </tr>
+            </thead>
+            <tbody id="pesertaBody">
+              <tr><td colspan="5">
+                <div class="empty-state">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
+                  </svg>
+                  <p>Belum ada peserta yang bergabung.<br>Bagikan link <strong>peserta.html</strong> ke peserta.</p>
+                </div>
+              </td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="table-scroll-hint">← geser untuk lihat semua →</div>
+      </div>
+
+      <!-- PANEL LOG -->
+      <div class="panel notif-panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+            </svg>
+            Log Peringatan
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <div class="download-dropdown" id="logDropdown">
+              <button class="btn-action btn-download-log" onclick="toggleDropdown('logDropdown')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="7 10 12 15 17 10"/>
+                  <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                Unduh
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:10px;height:10px">
+                  <path d="M6 9l6 6 6-6"/>
+                </svg>
+              </button>
+              <div class="download-menu" id="logDropdownMenu">
+                <div class="download-menu-item" onclick="downloadLogCSV(); closeDropdowns()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  Download CSV
+                </div>
+                <div class="download-menu-item" onclick="downloadLogTXT(); closeDropdowns()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  Download TXT
+                </div>
+                <div class="download-menu-sep"></div>
+                <div class="download-menu-item" onclick="clearLog(); closeDropdowns()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
+                  Bersihkan Log
+                </div>
+              </div>
+            </div>
+            <button class="sound-btn" onclick="toggleSound()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+              </svg>
+              <span id="soundLabel">Bunyi ON</span>
+            </button>
+          </div>
+        </div>
+        <div class="notif-list-wrap">
+          <div class="notif-list" id="notifList">
+            <div class="notif-empty">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+              </svg>
+              Belum ada peringatan
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- MODAL KONFIRMASI HAPUS -->
+<div class="modal-backdrop" id="modalBackdrop">
+  <div class="modal-card">
+    <div class="modal-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="3 6 5 6 21 6"/>
+        <path d="M19 6l-1 14H6L5 6"/>
+        <path d="M10 11v6M14 11v6"/>
+        <path d="M9 6V4h6v2"/>
+      </svg>
+    </div>
+    <div class="modal-title">Hapus Data Offline?</div>
+    <div class="modal-desc">
+      Semua peserta dengan status <strong style="color:var(--muted)">Offline</strong> akan dihapus permanen dari Firebase. Tindakan ini tidak dapat dibatalkan.
+    </div>
+    <div class="modal-count" id="modalOfflineCount">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px">
+        <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+      </svg>
+      <span id="modalOfflineText">0 peserta offline ditemukan</span>
+    </div>
+    <div class="modal-buttons">
+      <button class="btn-cancel" onclick="tutupModal()">Batal</button>
+      <button class="btn-confirm-delete" id="btnConfirmDelete" onclick="hapusDataOffline()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <polyline points="3 6 5 6 21 6"/>
+          <path d="M19 6l-1 14H6L5 6"/>
+        </svg>
+        Hapus Sekarang
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast">
+  <svg id="toastIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"></svg>
+  <span id="toastMsg"></span>
+</div>
+
+<script>
+  /* ═══════════════════════════════════════
+     KONFIGURASI 5 INSTANCE FIREBASE
+  ═══════════════════════════════════════ */
+  const FIREBASE_CONFIGS = {
+    1: {
+      label: 'pengawas-asaj',
+      apiKey: "AIzaSyAKtNE0UmdQADg0Z-fr5RAC2G1WmWYFZiA",
+      authDomain: "pengawas-asaj.firebaseapp.com",
+      projectId: "pengawas-asaj",
+      storageBucket: "pengawas-asaj.firebasestorage.app",
+      messagingSenderId: "595402624997",
+      appId: "1:595402624997:web:e04cb35e6ad2def860690c",
+      databaseURL: "https://pengawas-asaj-default-rtdb.asia-southeast1.firebasedatabase.app/"
+    },
+    2: {
+      label: 'pengawas-asaj2',
+      apiKey: "AIzaSyCGozv28dZfRzCEHZdjM99QgWEIYAcFlYw",
+      authDomain: "pengawas-asaj2.firebaseapp.com",
+      databaseURL: "https://pengawas-asaj2-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "pengawas-asaj2",
+      storageBucket: "pengawas-asaj2.firebasestorage.app",
+      messagingSenderId: "756103404926",
+      appId: "1:756103404926:web:032e5362e45385ce54672f"
+    },
+    3: {
+      label: 'pengawas-asaj3',
+      apiKey: "AIzaSyCsXW4F1NI275Dv8ddZoTH3mCvuC9DG0VM",
+      authDomain: "pengawas-asaj3.firebaseapp.com",
+      databaseURL: "https://pengawas-asaj3-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "pengawas-asaj3",
+      storageBucket: "pengawas-asaj3.firebasestorage.app",
+      messagingSenderId: "506580551249",
+      appId: "1:506580551249:web:f43d4b157fdb581a921a70"
+    },
+    4: {
+      label: 'pengawas-asaj4',
+      apiKey: "AIzaSyD99U8rAsko1kTErJZtTQ8KaGON5oWH70E",
+      authDomain: "pengawas-asaj4.firebaseapp.com",
+      databaseURL: "https://pengawas-asaj4-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "pengawas-asaj4",
+      storageBucket: "pengawas-asaj4.firebasestorage.app",
+      messagingSenderId: "578093570451",
+      appId: "1:578093570451:web:ef0dadb6fdbf0391123066"
+    },
+    5: {
+      label: 'pengawas-asaj5',
+      apiKey: "AIzaSyCqSv7Z29nSTAYrz28Opfi68snM40B7biY",
+      authDomain: "pengawas-asaj5.firebaseapp.com",
+      databaseURL: "https://pengawas-asaj5-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "pengawas-asaj5",
+      storageBucket: "pengawas-asaj5.firebasestorage.app",
+      messagingSenderId: "895691114400",
+      appId: "1:895691114400:web:e5d79e89625cd7d6d4c6c5"
+    }
+  };
+
+  /* ── STATE ── */
+  let db = null;
+  let firebaseApp = null;
+  let dbListener = null;
+  let selectedInstance = null;
+  let soundEnabled = true;
+  const pesertaData = {};
+  const avatarColors = ['#4ade80','#60a5fa','#f472b6','#fb923c','#a78bfa','#34d399','#f59e0b'];
+  const MAX_NOTIF = 100;
+  const logHistory = [];
+
+  /*
+   * BUG FIX #1 — activeFilters menggunakan null (bukan undefined)
+   * sebagai nilai "tidak ada filter" agar === null check konsisten.
+   */
+  const activeFilters = { kelas: null, ruangan: null, status: null };
+
+  /* ═══════════════════════════════════════
+     SELECTOR
+  ═══════════════════════════════════════ */
+  function pilihInstance(num) {
+    selectedInstance = num;
+    document.querySelectorAll('.instance-btn').forEach(btn => {
+      btn.classList.toggle('active', parseInt(btn.dataset.instance) === num);
+    });
+    document.getElementById('btnMasuk').disabled = false;
+  }
+
+  function masukKePanel() {
+    if (!selectedInstance) return;
+    initFirebase(selectedInstance);
+    document.getElementById('selectorOverlay').style.display = 'none';
+    document.getElementById('appContainer').style.display = 'block';
+    document.getElementById('headerInstanceName').textContent = FIREBASE_CONFIGS[selectedInstance].label;
+  }
+
+  function gantiInstance() {
+    /* Lepas listener lama */
+    if (dbListener && db) {
+      try { db.ref('ujian/peserta').off('value', dbListener); } catch(e) {}
+      dbListener = null;
+    }
+    /* Reset state */
+    Object.keys(pesertaData).forEach(k => delete pesertaData[k]);
+    logHistory.length = 0;
+    activeFilters.kelas = activeFilters.ruangan = activeFilters.status = null;
+
+    renderTable();
+    updateStats();
+    clearLogSilent();
+
+    document.getElementById('appContainer').style.display = 'none';
+    document.getElementById('selectorOverlay').style.display = 'flex';
+    document.querySelectorAll('.instance-btn').forEach(btn => btn.classList.remove('active'));
+    document.getElementById('btnMasuk').disabled = true;
+    selectedInstance = null;
+  }
+
+  /* ═══════════════════════════════════════
+     FIREBASE
+  ═══════════════════════════════════════ */
+  function initFirebase(instanceNum) {
+    try {
+      const cfg = FIREBASE_CONFIGS[instanceNum];
+
+      /*
+       * BUG FIX #2 — Hindari collision nama Firebase app.
+       * Gunakan nama unik berbasis timestamp + instanceNum.
+       * Hapus app lama sebelum init (tapi delete() tidak perlu await karena
+       * firebase compat SDK menanganinya secara sinkron untuk keperluan re-init).
+       */
+      if (firebaseApp) {
+        try { firebaseApp.delete(); } catch(e) {}
+        firebaseApp = null;
+        db = null;
+      }
+
+      const appName = `pengawas_${instanceNum}_${Date.now()}`;
+      firebaseApp = firebase.initializeApp(cfg, appName);
+      db = firebaseApp.database();
+      listenToPeserta();
+    } catch(e) {
+      console.error('Firebase init error:', e);
+      showToast('Gagal menghubungkan ke Firebase. Coba lagi.', 'error');
+    }
+  }
+
+  function listenToPeserta() {
+    const ref = db.ref('ujian/peserta');
+
+    dbListener = ref.on('value', (snapshot) => {
+      const data = snapshot.val() || {};
+
+      Object.keys(data).forEach(id => {
+        const curr = data[id];
+
+        /*
+         * BUG FIX #3 — Skip data sampah: node yang tidak punya
+         * nama DAN tidak punya id diabaikan (bisa terjadi jika
+         * ada sub-key lain di path ujian/peserta).
+         */
+        if (!curr || (!curr.nama && !curr.id)) return;
+
+        const prev = pesertaData[id];
+
+        /*
+         * BUG FIX #4 — Notifikasi HANYA jika:
+         * 1. Peserta sudah ada sebelumnya (bukan pertama kali load)
+         * 2. Status benar-benar berubah
+         * 3. prev.status sudah terdefinisi (bukan undefined dari load awal)
+         */
+        if (prev && prev.status !== undefined && prev.status !== curr.status) {
+          addNotification(curr, curr.status);
+        }
+
+        /* Simpan data SETELAH cek */
+        pesertaData[id] = curr;
+      });
+
+      /* Hapus peserta yang sudah tidak ada di Firebase */
+      Object.keys(pesertaData).forEach(id => {
+        if (!data[id]) delete pesertaData[id];
+      });
+
+      renderFilterChips();
+      renderTable();
+      updateStats();
+    });
+  }
+
+  /* ═══════════════════════════════════════
+     HELPERS
+  ═══════════════════════════════════════ */
+  function getInitials(name) {
+    if (!name || !name.trim()) return '?';
+    return name.trim().split(/\s+/).map(w => w[0]).join('').substring(0, 2).toUpperCase();
+  }
+
+  function getAvatarColor(id) {
+    let hash = 0;
+    for (let c of String(id)) hash = (hash << 5) - hash + c.charCodeAt(0);
+    return avatarColors[Math.abs(hash) % avatarColors.length];
+  }
+
+  function statusPill(status) {
+    const map = {
+      aman:    { cls: 'aman',    label: 'Aman' },
+      tab:     { cls: 'tab',     label: 'Buka Tab Lain' },
+      keluar:  { cls: 'keluar',  label: 'Keluar Halaman' },
+      offline: { cls: 'offline', label: 'Offline' },
+      selesai: { cls: 'selesai', label: 'Selesai' },
+    };
+    const s = map[status] || map.offline;
+    return `<span class="status-pill ${s.cls}"><span class="status-dot"></span>${s.label}</span>`;
+  }
+
+  function statusLabel(status) {
+    const map = { aman:'Aman', tab:'Buka Tab Lain', keluar:'Keluar Halaman', offline:'Offline', selesai:'Selesai' };
+    return map[status] || status;
+  }
+
+  /*
+   * BUG FIX #5 — "d" dalam "Xd lalu" adalah singkatan detik, bukan hari.
+   * Harusnya "dtk" agar tidak membingungkan ("2d lalu" dibaca "2 hari lalu").
+   */
+  function timeAgo(ts) {
+    if (!ts) return '—';
+    const diff = Math.floor((Date.now() - ts) / 1000);
+    if (diff < 5)    return 'Baru saja';
+    if (diff < 60)   return `${diff}dtk lalu`;
+    if (diff < 3600) return `${Math.floor(diff / 60)}m lalu`;
+    return new Date(ts).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function nowStr() {
+    return new Date().toLocaleString('id-ID', {
+      day:'2-digit', month:'2-digit', year:'numeric',
+      hour:'2-digit', minute:'2-digit', second:'2-digit'
+    });
+  }
+
+  function filenameDate() {
+    return new Date().toLocaleDateString('id-ID').replace(/\//g, '-');
+  }
+
+  /* ═══════════════════════════════════════
+     FILTER LOGIC
+  ═══════════════════════════════════════ */
+  function getUniqueValues(field) {
+    const vals = new Set();
+    Object.values(pesertaData).forEach(p => { if (p[field]) vals.add(p[field]); });
+    return [...vals].sort();
+  }
+
+  function renderFilterChips() {
+    const kelasList   = getUniqueValues('kelas');
+    const ruanganList = getUniqueValues('ruangan');
+
+    /* Kelas chips */
+    const kelasGroup = document.getElementById('filterKelasGroup');
+    kelasGroup.innerHTML = kelasList.length === 0
+      ? `<span style="font-family:var(--mono);font-size:11px;color:var(--muted);font-style:italic">Belum ada data</span>`
+      : kelasList.map(k => {
+          const safe = escAttr(k);
+          const isActive = activeFilters.kelas === k;
+          return `<button class="filter-chip ${isActive ? 'active-purple' : ''}"
+            data-type="kelas" data-value="${safe}" onclick="toggleFilter('kelas','${safe}')">
+            <span class="filter-dot" style="color:var(--purple)"></span>${escHtml(k)}</button>`;
+        }).join('');
+
+    /* Ruangan chips
+     * BUG FIX #6 — Jangan encodeURIComponent di data-value; pakai escAttr saja.
+     * encodeURIComponent membuat nilai tidak bisa dicocokkan saat filter.
+     */
+    const ruanganGroup = document.getElementById('filterRuanganGroup');
+    ruanganGroup.innerHTML = ruanganList.length === 0
+      ? `<span style="font-family:var(--mono);font-size:11px;color:var(--muted);font-style:italic">Belum ada data</span>`
+      : ruanganList.map(r => {
+          const safe = escAttr(r);
+          const isActive = activeFilters.ruangan === r;
+          return `<button class="filter-chip ${isActive ? 'active' : ''}"
+            data-type="ruangan" data-value="${safe}" onclick="toggleFilter('ruangan','${safe}')">
+            <span class="filter-dot" style="color:var(--blue)"></span>${escHtml(r)}</button>`;
+        }).join('');
+
+    /*
+     * BUG FIX #7 — Sync status chip .active state setelah renderFilterChips().
+     * Status chip dibuat secara statis di HTML sehingga class .active-nya
+     * hilang jika renderFilterChips() dipanggil tanpa sync.
+     */
+    syncStatusChips();
+  }
+
+  function syncStatusChips() {
+    document.querySelectorAll('[data-type="status"]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.value === activeFilters.status);
+    });
+  }
+
+  function toggleFilter(type, value) {
+    activeFilters[type] = activeFilters[type] === value ? null : value;
+    renderFilterChips();
+    renderTable();
+    updateFilterUI();
+  }
+
+  function resetFilter() {
+    activeFilters.kelas = activeFilters.ruangan = activeFilters.status = null;
+    renderFilterChips();
+    renderTable();
+    updateFilterUI();
+  }
+
+  function updateFilterUI() {
+    const hasFilter = activeFilters.kelas || activeFilters.ruangan || activeFilters.status;
+    document.getElementById('btnResetFilter').style.display = hasFilter ? 'flex' : 'none';
+
+    const filteredList = getFilteredList();
+    const allList = Object.values(pesertaData);
+    if (hasFilter) {
+      document.getElementById('filterResultInfo').style.display = 'inline-flex';
+      document.getElementById('filterResultCount').textContent = filteredList.length;
+      document.getElementById('filterTotalCount').textContent  = allList.length;
+    } else {
+      document.getElementById('filterResultInfo').style.display = 'none';
+    }
+  }
+
+  function getFilteredList() {
+    return Object.values(pesertaData).filter(p => {
+      if (activeFilters.kelas   && p.kelas   !== activeFilters.kelas)   return false;
+      if (activeFilters.ruangan && p.ruangan !== activeFilters.ruangan) return false;
+      if (activeFilters.status  && p.status  !== activeFilters.status)  return false;
+      return true;
+    });
+  }
+
+  /* ═══════════════════════════════════════
+     ESCAPE HELPERS (XSS prevention)
+  ═══════════════════════════════════════ */
+  function escHtml(s) {
+    return String(s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  }
+
+  function escAttr(s) {
+    /* Safe untuk dipakai dalam onclick="...toggleFilter('x','VALUE')" */
+    return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;');
+  }
+
+  /* ═══════════════════════════════════════
+     RENDER TABLE
+  ═══════════════════════════════════════ */
+  function renderTable() {
+    const tbody        = document.getElementById('pesertaBody');
+    const allList      = Object.values(pesertaData);
+    const filteredList = getFilteredList();
+
+    document.getElementById('pesertaCount').textContent = `${filteredList.length} peserta`;
+
+    const offlineCount = allList.filter(p => p.status === 'offline').length;
+    const btn = document.getElementById('btnDeleteOffline');
+    btn.disabled = offlineCount === 0;
+    btn.title = offlineCount === 0 ? 'Tidak ada data offline' : `${offlineCount} peserta offline`;
+
+    if (filteredList.length === 0) {
+      const msg = (activeFilters.kelas || activeFilters.ruangan || activeFilters.status)
+        ? 'Tidak ada peserta yang sesuai dengan filter yang dipilih.'
+        : 'Belum ada peserta yang bergabung.<br>Bagikan link <strong>peserta.html</strong> ke peserta.';
+      tbody.innerHTML = `<tr><td colspan="5">
+        <div class="empty-state">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
+          </svg>
+          <p>${msg}</p>
+        </div></td></tr>`;
+      return;
+    }
+
+    const order = { keluar: 0, tab: 1, aman: 2, selesai: 3, offline: 4 };
+    filteredList.sort((a, b) => (order[a.status] ?? 5) - (order[b.status] ?? 5));
+
+    tbody.innerHTML = filteredList.map(p => {
+      const color = getAvatarColor(p.id || p.nama || '?');
+
+      /*
+       * BUG FIX #8 — parseInt() lalu || 0 supaya null/undefined/NaN semua
+       * menjadi 0 dengan benar. Nilai string "3" pun ter-parse.
+       */
+      const v = parseInt(p.violations, 10) || 0;
+
+      const namaDisplay = (p.nama && p.nama.trim()) ? escHtml(p.nama.trim()) : '(Tanpa Nama)';
+      const idDisplay   = (p.id   && String(p.id).trim()) ? escHtml(String(p.id).trim()) : '—';
+
+      const kelas = p.kelas
+        ? `<span class="meta-pill kelas">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+              <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+            </svg>${escHtml(p.kelas)}</span>`
+        : '<span style="color:var(--muted);font-size:11px;">—</span>';
+
+      const ruangan = p.ruangan
+        ? `<span class="meta-pill ruangan">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+              <polyline points="9 22 9 12 15 12 15 22"/>
+            </svg>${escHtml(p.ruangan)}</span>`
+        : '';
+
+      return `
+        <tr class="peserta-row">
+          <td>
+            <div class="peserta-info">
+              <div class="avatar" style="background:${color}22;color:${color}">${getInitials(p.nama)}</div>
+              <div>
+                <div class="peserta-name">${namaDisplay}</div>
+                <div class="peserta-id">${idDisplay}</div>
+              </div>
+            </div>
+          </td>
+          <td><div style="display:flex;flex-wrap:wrap;gap:2px;align-items:center">${kelas}${ruangan}</div></td>
+          <td>${statusPill(p.status)}</td>
+          <td><div class="violation-count ${v > 0 ? 'has-violations' : ''}">${v > 0 ? v + '×' : '—'}</div></td>
+          <td><div class="time-cell">${timeAgo(p.lastUpdate)}</div></td>
+        </tr>`;
+    }).join('');
+
+    updateFilterUI();
+  }
+
+  /* ═══════════════════════════════════════
+     STATS
+  ═══════════════════════════════════════ */
+  function updateStats() {
+    const list = Object.values(pesertaData);
+    document.getElementById('statTotal').textContent   = list.length;
+    document.getElementById('statAman').textContent    = list.filter(p => p.status === 'aman').length;
+    document.getElementById('statTab').textContent     = list.filter(p => p.status === 'tab').length;
+    document.getElementById('statKeluar').textContent  = list.filter(p => p.status === 'keluar').length;
+    document.getElementById('statKelas').textContent   = new Set(list.map(p => p.kelas).filter(Boolean)).size;
+    document.getElementById('statRuangan').textContent = new Set(list.map(p => p.ruangan).filter(Boolean)).size;
+  }
+
+  /* ═══════════════════════════════════════
+     DOWNLOAD TABEL
+  ═══════════════════════════════════════ */
+  function tableToCSV(list) {
+    const bom    = '\uFEFF';
+    const header = ['Nama', 'ID Peserta', 'Kelas', 'Ruangan', 'Status', 'Jumlah Pelanggaran', 'Terakhir Update'];
+    const rows   = list.map(p => [
+      p.nama || '', p.id || '', p.kelas || '—', p.ruangan || '—',
+      statusLabel(p.status), parseInt(p.violations, 10) || 0,
+      p.lastUpdate ? new Date(p.lastUpdate).toLocaleString('id-ID') : '—'
+    ]);
+    return bom + [header, ...rows]
+      .map(row => row.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))
+      .join('\r\n');
+  }
+
+  function downloadTableCSV() {
+    const list = Object.values(pesertaData);
+    if (!list.length) { showToast('Tidak ada data peserta untuk didownload.', 'info'); return; }
+    triggerDownload(tableToCSV(list), `Tabel_Peserta_${filenameDate()}.csv`, 'text/csv;charset=utf-8;');
+    showToast(`${list.length} data peserta berhasil didownload (CSV).`, 'success');
+  }
+
+  function downloadTableJSON() {
+    const list = Object.values(pesertaData);
+    if (!list.length) { showToast('Tidak ada data peserta untuk didownload.', 'info'); return; }
+    const data = list.map(p => ({
+      nama: p.nama || '', id: p.id || '', kelas: p.kelas || '—', ruangan: p.ruangan || '—',
+      status: statusLabel(p.status), pelanggaran: parseInt(p.violations, 10) || 0,
+      lastUpdate: p.lastUpdate ? new Date(p.lastUpdate).toLocaleString('id-ID') : null
+    }));
+    const json = JSON.stringify({
+      exportedAt: nowStr(),
+      instance: FIREBASE_CONFIGS[selectedInstance]?.label,
+      total: data.length,
+      peserta: data
+    }, null, 2);
+    triggerDownload(json, `Tabel_Peserta_${filenameDate()}.json`, 'application/json');
+    showToast(`${list.length} data peserta berhasil didownload (JSON).`, 'success');
+  }
+
+  function downloadTableViolationsOnly() {
+    const list = Object.values(pesertaData).filter(p => (parseInt(p.violations, 10) || 0) > 0);
+    if (!list.length) { showToast('Tidak ada peserta dengan pelanggaran.', 'info'); return; }
+    triggerDownload(tableToCSV(list), `Pelanggaran_${filenameDate()}.csv`, 'text/csv;charset=utf-8;');
+    showToast(`${list.length} data pelanggaran berhasil didownload.`, 'success');
+  }
+
+  function downloadTableFiltered() {
+    const list = getFilteredList();
+    if (!list.length) { showToast('Tidak ada data pada filter saat ini.', 'info'); return; }
+    const label = [
+      activeFilters.kelas   ? `Kelas-${activeFilters.kelas}` : '',
+      activeFilters.ruangan ? activeFilters.ruangan.replace(/\s+/g, '-') : '',
+      activeFilters.status  ? activeFilters.status : ''
+    ].filter(Boolean).join('_') || 'Filter';
+    triggerDownload(tableToCSV(list), `Tabel_${label}_${filenameDate()}.csv`, 'text/csv;charset=utf-8;');
+    showToast(`${list.length} data hasil filter berhasil didownload.`, 'success');
+  }
+
+  /* ═══════════════════════════════════════
+     DOWNLOAD LOG
+  ═══════════════════════════════════════ */
+  function downloadLogCSV() {
+    if (!logHistory.length) { showToast('Belum ada log peringatan untuk didownload.', 'info'); return; }
+    const bom    = '\uFEFF';
+    const header = ['Waktu', 'Nama Peserta', 'ID Peserta', 'Kelas', 'Ruangan', 'Jenis Kejadian', 'Keterangan'];
+    const rows   = logHistory.map(l => [l.waktu, l.nama, l.id, l.kelas || '—', l.ruangan || '—', l.jenis, l.keterangan]);
+    const csv    = bom + [header, ...rows]
+      .map(row => row.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))
+      .join('\r\n');
+    triggerDownload(csv, `Log_Peringatan_${filenameDate()}.csv`, 'text/csv;charset=utf-8;');
+    showToast(`${logHistory.length} entri log berhasil didownload (CSV).`, 'success');
+  }
+
+  function downloadLogTXT() {
+    if (!logHistory.length) { showToast('Belum ada log peringatan untuk didownload.', 'info'); return; }
+    const header = `PANEL PENGAWAS — LOG PERINGATAN UJIAN\nInstance  : ${FIREBASE_CONFIGS[selectedInstance]?.label || '—'}\nDiexpor pada: ${nowStr()}\nTotal entri: ${logHistory.length}\n${'='.repeat(60)}\n\n`;
+    const body   = logHistory.map((l, i) =>
+      `[${String(i + 1).padStart(3, '0')}] ${l.waktu}\n     Peserta  : ${l.nama} (${l.id})\n     Kelas    : ${l.kelas || '—'}\n     Ruangan  : ${l.ruangan || '—'}\n     Kejadian : ${l.jenis}\n     Detail   : ${l.keterangan}\n`
+    ).join('\n');
+    triggerDownload(header + body, `Log_Peringatan_${filenameDate()}.txt`, 'text/plain;charset=utf-8;');
+    showToast(`${logHistory.length} entri log berhasil didownload (TXT).`, 'success');
+  }
+
+  function clearLog() {
+    logHistory.length = 0;
+    document.getElementById('notifList').innerHTML = `<div class="notif-empty">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+      </svg>Belum ada peringatan</div>`;
+    showToast('Log berhasil dibersihkan.', 'info');
+  }
+
+  /* Versi tanpa toast, dipakai saat gantiInstance() */
+  function clearLogSilent() {
+    logHistory.length = 0;
+    document.getElementById('notifList').innerHTML = `<div class="notif-empty">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+      </svg>Belum ada peringatan</div>`;
+  }
+
+  /* ═══════════════════════════════════════
+     DOWNLOAD HELPER
+  ═══════════════════════════════════════ */
+  function triggerDownload(content, filename, type) {
+    const blob = new Blob([content], { type });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  /* ═══════════════════════════════════════
+     DROPDOWN
+  ═══════════════════════════════════════ */
+  function toggleDropdown(id) {
+    const menu   = document.getElementById(id + 'Menu');
+    const isOpen = menu.classList.contains('show');
+    closeDropdowns();
+    if (!isOpen) menu.classList.add('show');
+  }
+
+  function closeDropdowns() {
+    document.querySelectorAll('.download-menu').forEach(m => m.classList.remove('show'));
+  }
+
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.download-dropdown')) closeDropdowns();
+  });
+
+  /* ═══════════════════════════════════════
+     HAPUS OFFLINE
+  ═══════════════════════════════════════ */
+  function konfirmasiHapusOffline() {
+    const offlineList = Object.values(pesertaData).filter(p => p.status === 'offline');
+    if (offlineList.length === 0) { showToast('Tidak ada data offline yang perlu dihapus.', 'info'); return; }
+    document.getElementById('modalOfflineText').textContent = `${offlineList.length} peserta offline akan dihapus`;
+    document.getElementById('modalBackdrop').classList.add('show');
+  }
+
+  function tutupModal() { document.getElementById('modalBackdrop').classList.remove('show'); }
+
+  async function hapusDataOffline() {
+    if (!db) { showToast('Firebase belum terhubung.', 'error'); return; }
+    const offlineKeys = Object.entries(pesertaData)
+      .filter(([, p]) => p.status === 'offline')
+      .map(([key]) => key);
+    if (offlineKeys.length === 0) { tutupModal(); showToast('Tidak ada data offline ditemukan.', 'info'); return; }
+
+    const btn = document.getElementById('btnConfirmDelete');
+    btn.disabled = true;
+    btn.innerHTML = `<svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:14px;height:14px">
+      <path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>Menghapus...`;
+
+    try {
+      const updates = {};
+      offlineKeys.forEach(key => { updates[`ujian/peserta/${key}`] = null; });
+      await db.ref().update(updates);
+      tutupModal();
+      showToast(`${offlineKeys.length} data offline berhasil dihapus.`, 'success');
+    } catch (err) {
+      console.error('Gagal menghapus:', err);
+      showToast('Gagal menghapus data. Cek koneksi Firebase.', 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:14px;height:14px">
+        <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
+      </svg>Hapus Sekarang`;
+    }
+  }
+
+  document.getElementById('modalBackdrop').addEventListener('click', function(e) {
+    if (e.target === this) tutupModal();
+  });
+
+  /* ═══════════════════════════════════════
+     TOAST
+  ═══════════════════════════════════════ */
+  let toastTimer;
+  function showToast(msg, type = 'info') {
+    const toast = document.getElementById('toast');
+    const icon  = document.getElementById('toastIcon');
+    const text  = document.getElementById('toastMsg');
+    const icons = {
+      success: '<polyline points="20 6 9 17 4 12"/>',
+      error:   '<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>',
+      info:    '<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>',
+    };
+    toast.className  = `toast ${type}`;
+    icon.innerHTML   = icons[type] || icons.info;
+    text.textContent = msg;
+    clearTimeout(toastTimer);
+    requestAnimationFrame(() => { requestAnimationFrame(() => toast.classList.add('show')); });
+    toastTimer = setTimeout(() => toast.classList.remove('show'), 3500);
+  }
+
+  /* ═══════════════════════════════════════
+     NOTIFIKASI
+  ═══════════════════════════════════════ */
+  function addNotification(peserta, type) {
+    const listEl = document.getElementById('notifList');
+    const empty  = listEl.querySelector('.notif-empty');
+    if (empty) empty.remove();
+
+    if (soundEnabled) playBeep(type);
+
+    const msgMap = {
+      tab:    'membuka tab/window lain saat ujian berlangsung.',
+      keluar: 'keluar dari halaman ujian!',
+      aman:   'kembali ke halaman ujian.',
+      offline:'terputus dari jaringan.',
+    };
+    const msg = msgMap[type] || 'status berubah.';
+
+    const namaLog = (peserta.nama && peserta.nama.trim()) ? peserta.nama.trim() : '(Tanpa Nama)';
+    const idLog   = (peserta.id   && String(peserta.id).trim()) ? String(peserta.id).trim() : '—';
+
+    logHistory.unshift({
+      waktu      : nowStr(),
+      nama       : namaLog,
+      id         : idLog,
+      kelas      : peserta.kelas   || '—',
+      ruangan    : peserta.ruangan || '—',
+      jenis      : type === 'aman' ? 'Kembali' : type === 'tab' ? 'Buka Tab Lain' : type === 'keluar' ? 'Keluar Halaman' : 'Offline',
+      keterangan : msg
+    });
+
+    const typeClass = type === 'aman' ? 'kembali' : type;
+    const time = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const metaInfo = [peserta.kelas, peserta.ruangan].filter(Boolean).join(' · ');
+
+    const div = document.createElement('div');
+    div.className = `notif-item ${typeClass}`;
+    div.innerHTML = `
+      <div class="notif-header">
+        <span class="notif-name">${escHtml(namaLog)}</span>
+        <span class="notif-time">${time}</span>
+      </div>
+      <div class="notif-msg">${escHtml(namaLog)} ${escHtml(msg)}</div>
+      ${metaInfo ? `<div class="notif-meta">${escHtml(metaInfo)}</div>` : ''}`;
+
+    listEl.insertBefore(div, listEl.firstChild);
+
+    while (listEl.children.length > MAX_NOTIF) listEl.removeChild(listEl.lastChild);
+    if (logHistory.length > MAX_NOTIF) logHistory.splice(MAX_NOTIF);
+
+    if (Notification.permission === 'granted' && type !== 'aman') {
+      try { new Notification(`⚠️ ${namaLog}`, { body: msg }); } catch(e) {}
+    }
+  }
+
+  function playBeep(type) {
+    try {
+      const ctx  = new (window.AudioContext || window.webkitAudioContext)();
+      const osc  = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.frequency.value = type === 'keluar' ? 440 : 600;
+      gain.gain.value     = type === 'keluar' ? 0.3 : 0.2;
+      osc.start(); osc.stop(ctx.currentTime + (type === 'keluar' ? 0.4 : 0.2));
+    } catch(e) {}
+  }
+
+  function toggleSound() {
+    soundEnabled = !soundEnabled;
+    document.getElementById('soundLabel').textContent = soundEnabled ? 'Bunyi ON' : 'Bunyi OFF';
+  }
+
+  /* ═══════════════════════════════════════
+     CLOCK & INIT
+  ═══════════════════════════════════════ */
+  function updateClock() {
+    document.getElementById('clock').textContent = new Date().toLocaleTimeString('id-ID');
+  }
+
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission();
+  }
+
+  /*
+   * BUG FIX #9 — setInterval renderTable() juga harus call renderFilterChips()
+   * agar chip filter tidak stale (misalnya setelah peserta baru masuk di luar
+   * jangkauan Firebase listener yang mungkin sudah lama tidak fire).
+   * Sebenarnya Firebase listener sudah real-time jadi ini hanya safety net.
+   */
+  setInterval(() => {
+    renderFilterChips();
+    renderTable();
+  }, 30000);
+
+  setInterval(updateClock, 1000);
+  updateClock();
+</script>
+</body>
+</html>
