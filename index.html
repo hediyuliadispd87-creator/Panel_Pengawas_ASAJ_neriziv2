@@ -1094,7 +1094,9 @@
   /* ── STATE ── */
   let db = null;
   let firebaseApp = null;
-  let dbListener = null;
+  let dbListener = null;   /* named function — bukan return value on() */
+  let dbRef = null;        /* simpan ref agar .off() bisa dipakai meski db sudah ganti */
+  let isInitialLoad = true; /* true selama snapshot pertama, tidak boleh trigger notif */
   let selectedInstance = null;
   let soundEnabled = true;
   const pesertaData = {};
@@ -1128,12 +1130,17 @@
   }
 
   function gantiInstance() {
-    /* Lepas listener lama */
-    if (dbListener && db) {
-      try { db.ref('ujian/peserta').off('value', dbListener); } catch(e) {}
+    /*
+     * Lepas listener SEBELUM hapus app — pakai dbRef yang tersimpan
+     * bukan db.ref() baru, karena db mungkin sudah invalid saat ini.
+     */
+    if (dbListener && dbRef) {
+      try { dbRef.off('value', dbListener); } catch(e) {}
       dbListener = null;
+      dbRef = null;
     }
     /* Reset state */
+    isInitialLoad = true;
     Object.keys(pesertaData).forEach(k => delete pesertaData[k]);
     logHistory.length = 0;
     activeFilters.kelas = activeFilters.ruangan = activeFilters.status = null;
@@ -1156,17 +1163,22 @@
     try {
       const cfg = FIREBASE_CONFIGS[instanceNum];
 
-      /*
-       * BUG FIX #2 — Hindari collision nama Firebase app.
-       * Gunakan nama unik berbasis timestamp + instanceNum.
-       * Hapus app lama sebelum init (tapi delete() tidak perlu await karena
-       * firebase compat SDK menanganinya secara sinkron untuk keperluan re-init).
-       */
+      /* 1. Lepas listener lama sebelum app dihapus */
+      if (dbListener && dbRef) {
+        try { dbRef.off('value', dbListener); } catch(e) {}
+        dbListener = null;
+        dbRef = null;
+      }
+
+      /* 2. Hapus Firebase app lama */
       if (firebaseApp) {
         try { firebaseApp.delete(); } catch(e) {}
         firebaseApp = null;
         db = null;
       }
+
+      /* 3. Selalu anggap snapshot pertama sebagai initial load */
+      isInitialLoad = true;
 
       const appName = `pengawas_${instanceNum}_${Date.now()}`;
       firebaseApp = firebase.initializeApp(cfg, appName);
@@ -1179,35 +1191,36 @@
   }
 
   function listenToPeserta() {
-    const ref = db.ref('ujian/peserta');
+    dbRef = db.ref('ujian/peserta');
 
-    dbListener = ref.on('value', (snapshot) => {
+    /*
+     * NAMED FUNCTION — wajib agar .off('value', dbListener) bisa
+     * benar-benar mencabut listener ini, bukan listener lain.
+     * Return value dari .on() di Firebase compat = callback itu sendiri,
+     * tapi lebih aman simpan sebagai named function eksplisit.
+     */
+    dbListener = function(snapshot) {
       const data = snapshot.val() || {};
 
       Object.keys(data).forEach(id => {
         const curr = data[id];
-
-        /*
-         * BUG FIX #3 — Skip data sampah: node yang tidak punya
-         * nama DAN tidak punya id diabaikan (bisa terjadi jika
-         * ada sub-key lain di path ujian/peserta).
-         */
         if (!curr || (!curr.nama && !curr.id)) return;
 
         const prev = pesertaData[id];
 
         /*
-         * BUG FIX #4 — Notifikasi HANYA jika:
-         * 1. Peserta sudah ada sebelumnya (bukan pertama kali load)
-         * 2. Status benar-benar berubah
-         * 3. prev.status sudah terdefinisi (bukan undefined dari load awal)
+         * Cek notifikasi:
+         * - isInitialLoad: SKIP semua — ini bukan perubahan, hanya data awal
+         * - prev harus ada dan statusnya harus benar-benar berbeda
+         *
+         * Simpan SALINAN (spread) agar prev tidak ikut berubah
+         * ketika Firebase SDK meng-update objek yang sama di memory.
          */
-        if (prev && prev.status !== undefined && prev.status !== curr.status) {
+        if (!isInitialLoad && prev && prev.status !== undefined && prev.status !== curr.status) {
           addNotification(curr, curr.status);
         }
 
-        /* Simpan data SETELAH cek */
-        pesertaData[id] = curr;
+        pesertaData[id] = { ...curr }; /* shallow copy — cegah shared reference */
       });
 
       /* Hapus peserta yang sudah tidak ada di Firebase */
@@ -1215,10 +1228,15 @@
         if (!data[id]) delete pesertaData[id];
       });
 
+      /* Setelah snapshot pertama selesai diproses, baru boleh trigger notif */
+      isInitialLoad = false;
+
       renderFilterChips();
       renderTable();
       updateStats();
-    });
+    };
+
+    dbRef.on('value', dbListener);
   }
 
   /* ═══════════════════════════════════════
